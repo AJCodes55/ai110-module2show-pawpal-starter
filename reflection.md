@@ -112,7 +112,7 @@
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
-
+--> Yes. The UML code given by claude had some mistakes. It did not account for a lot of relationships (For ex. 'Owner has pets'). Mistakes rectified later .
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
