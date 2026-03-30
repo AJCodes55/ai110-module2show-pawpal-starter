@@ -32,6 +32,54 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+## Smart Scheduling
+
+PawPal+ goes beyond a basic task list with a set of scheduling intelligence features built into `pawpal_system.py`.
+
+### Time-aware scheduling
+
+Every task that makes it into the daily plan is assigned a concrete **start time** based on the owner's preferred schedule (morning = 8 AM, evening = 6 PM, flexible = 9 AM). Tasks are placed back-to-back in priority order and automatically sorted chronologically so the day reads like a real timetable.
+
+```
+08:00 AM  Morning walk       (30 min) [daily]
+08:30 AM  Feeding            (10 min) [daily]
+08:40 AM  Vet medication     ( 5 min) [URGENT]
+```
+
+### Recurring tasks
+
+Tasks can be marked with a recurrence rule so they only appear on the right days:
+
+| Rule | Behaviour |
+|---|---|
+| `daily` | Scheduled every day |
+| `weekdays` | Monday – Friday only |
+| `weekends` | Saturday – Sunday only |
+| `weekly` | Same weekday each week |
+
+When a recurring task is completed via `Schedule.complete_task()`, a new instance for the **next occurrence** is automatically created and queued in `schedule.upcoming` — no manual re-entry needed.
+
+### Filtering
+
+After a schedule is generated you can slice it two ways:
+
+- **By pet** — `schedule.filter_by_pet("Buddy")` returns only Buddy's tasks.
+- **By status** — `schedule.filter_by_status(completed=False)` returns pending tasks; `completed=True` returns finished ones.
+
+Both methods return plain lists, so they compose easily (filter by pet, then filter that list by status).
+
+### Conflict detection
+
+`Schedule.check_conflicts()` scans every pair of scheduled tasks for time-window overlaps and returns a list of plain warning strings — it never raises an exception or stops the program.
+
+Three situations are reported:
+
+- **Same pet, same start time** — `WARNING: 'Feeding' and 'Medication' [both: Buddy] start at the same time (08:00 AM)`
+- **Different pets, overlapping windows** — `WARNING: 'Walk' and 'Vet visit' [Buddy & Luna] overlap (08:00–08:30 AM vs 08:20–08:30 AM)`
+- **Clean schedule** — returns an empty list; the Streamlit UI shows a green success banner.
+
+The Streamlit UI (`app.py`) surfaces all of these features: a recurrence dropdown when adding tasks, a collapsible filter panel on the task list, and a conflict report that appears automatically after every schedule generation.
+
 ### Suggested workflow
 
 1. Read the scenario carefully and identify requirements and edge cases.
