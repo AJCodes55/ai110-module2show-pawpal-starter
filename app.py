@@ -7,6 +7,7 @@ from pawpal_system import (
     Owner,
     Pet,
     Planner,
+    Schedule,
     Task,
     UserPreferences,
 )
@@ -95,7 +96,6 @@ if st.button("Add Task"):
     )
     st.session_state["tasks"].append(task)
 
-    # Also assign the task to the pet if an owner is set
     if owner_now is not None:
         pet = owner_now.pets[0]
         pet.add_task(task)
@@ -103,21 +103,43 @@ if st.button("Add Task"):
     else:
         st.success(f'Added "{task.name}" to task list')
 
-if st.session_state["tasks"]:
-    st.write("Current tasks:")
-    st.table([
+
+def _priority_badge(priority: int) -> str:
+    if priority >= 8:
+        return "High"
+    if priority >= 5:
+        return "Medium"
+    return "Low"
+
+
+def _task_rows(tasks: list[Task]) -> list[dict]:
+    return [
         {
             "Task": t.name,
             "Duration (min)": t.duration,
-            "Priority": t.priority,
+            "Priority": _priority_badge(t.priority),
+            "Score": t.get_priority_score(),
             "Category": t.category,
-            "Mandatory": t.is_mandatory,
-            "Recurrence": t.recurrence or "—",
+            "Mandatory": "Yes" if t.is_mandatory else "No",
+            "Recurring": t.recurrence if t.recurrence else "—",
             "Pet": t.pet_name or "—",
-            "Done": t.completed,
+            "Done": "Yes" if t.completed else "No",
         }
-        for t in st.session_state["tasks"]
-    ])
+        for t in tasks
+    ]
+
+
+if st.session_state["tasks"]:
+    # Build a Schedule object so we can use its sorting and filtering methods
+    task_schedule = Schedule()
+    for t in st.session_state["tasks"]:
+        task_schedule.add_task(t)
+
+    # Sort by priority score (highest first) for the overview table
+    sorted_by_score = sorted(task_schedule.tasks, key=lambda t: t.get_priority_score(), reverse=True)
+
+    st.write("Current tasks (sorted by priority score):")
+    st.table(_task_rows(sorted_by_score))
 
     with st.expander("Filter tasks"):
         col_f1, col_f2 = st.columns(2)
@@ -126,27 +148,43 @@ if st.session_state["tasks"]:
         with col_f2:
             filter_status = st.selectbox("Filter by status", ["All", "Pending", "Completed"])
 
-        filtered = list(st.session_state["tasks"])
+        # Use Schedule's filter_by_pet and filter_by_status methods
         if filter_pet.strip():
-            filtered = [t for t in filtered if t.pet_name.lower() == filter_pet.strip().lower()]
+            filtered = task_schedule.filter_by_pet(filter_pet.strip())
+        else:
+            filtered = list(task_schedule.tasks)
+
         if filter_status == "Pending":
-            filtered = [t for t in filtered if not t.completed]
+            # Create a temp schedule from the already-pet-filtered list to call filter_by_status
+            tmp = Schedule()
+            for t in filtered:
+                tmp.add_task(t)
+            filtered = tmp.filter_by_status(completed=False)
         elif filter_status == "Completed":
-            filtered = [t for t in filtered if t.completed]
+            tmp = Schedule()
+            for t in filtered:
+                tmp.add_task(t)
+            filtered = tmp.filter_by_status(completed=True)
 
         if filtered:
+            st.table(_task_rows(filtered))
+        else:
+            st.info("No tasks match the current filter.")
+
+    # Highlight recurring tasks
+    recurring = [t for t in task_schedule.tasks if t.recurrence]
+    if recurring:
+        with st.expander(f"Recurring tasks ({len(recurring)})"):
             st.table([
                 {
                     "Task": t.name,
+                    "Recurrence": t.recurrence,
                     "Category": t.category,
-                    "Recurrence": t.recurrence or "—",
+                    "Duration (min)": t.duration,
                     "Pet": t.pet_name or "—",
-                    "Done": t.completed,
                 }
-                for t in filtered
+                for t in recurring
             ])
-        else:
-            st.info("No tasks match the current filter.")
 else:
     st.info("No tasks yet. Add one above.")
 
@@ -178,33 +216,75 @@ if st.button("Generate Schedule"):
         )
 
         schedule = planner.generate_plan()
+        # sort_by_time is already called inside generate_plan(), but call it
+        # explicitly here to make the dependency on Schedule's method clear
+        schedule.sort_by_time()
+
         explanation = planner._explanation_engine.explain(schedule)
 
-        st.success("Today's Schedule")
+        # --- Schedule table ---
+        st.success("Today's Schedule (sorted by start time)")
         st.table([
             {
                 "Start Time": t.scheduled_time.strftime("%I:%M %p") if t.scheduled_time else "—",
                 "Task": t.name,
                 "Duration (min)": t.duration,
-                "Priority": t.priority,
-                "Mandatory": t.is_mandatory,
-                "Recurrence": t.recurrence or "—",
-                "Urgent": t.is_urgent(datetime.now()),
+                "Priority": _priority_badge(t.priority),
+                "Score": t.get_priority_score(),
+                "Mandatory": "Yes" if t.is_mandatory else "No",
+                "Recurring": t.recurrence if t.recurrence else "—",
+                "Urgent": "Yes" if t.is_urgent(datetime.now()) else "No",
             }
             for t in schedule.tasks
         ])
 
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric("Total time scheduled", f"{schedule.total_time} min")
-        col_m2.metric("Unused time", f"{schedule.unused_time} min")
+        # --- Time metrics ---
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Tasks scheduled", len(schedule.tasks))
+        col_m2.metric("Total time scheduled", f"{schedule.total_time} min")
+        col_m3.metric("Unused time", f"{schedule.unused_time} min")
 
+        # --- Conflict report using Schedule.check_conflicts() ---
+        st.markdown("**Conflict report**")
+        conflict_warnings = schedule.check_conflicts()
+        if conflict_warnings:
+            for warning in conflict_warnings:
+                st.warning(warning)
+        else:
+            st.success("No time conflicts detected.")
+
+        # --- Excluded mandatory tasks via ConflictDetector ---
+        detector = ConflictDetector()
+        excluded = detector.find_excluded_mandatory(st.session_state["tasks"], schedule)
+        if excluded:
+            st.markdown("**Mandatory tasks that could not be scheduled (not enough time):**")
+            for t in excluded:
+                st.warning(f"'{t.name}' — {t.duration} min required, but it did not fit in today's schedule.")
+        else:
+            st.success("All mandatory tasks fit in today's schedule.")
+
+        # --- Overbooked categories ---
+        overbooked = detector.find_overbooked_categories(st.session_state["tasks"], constraints)
+        if overbooked:
+            st.markdown("**Overbooked categories:**")
+            for cat, count in overbooked.items():
+                limit = constraints.task_limits[cat]
+                st.warning(f"Category '{cat}' has {count} tasks but the daily limit is {limit}.")
+
+        # --- Explanation ---
         st.markdown("**Why these tasks?**")
         st.text(explanation)
 
-        st.markdown("**Conflict report**")
-        detector = ConflictDetector()
-        report = detector.report(schedule, st.session_state["tasks"], constraints)
-        if report == "No conflicts detected.":
-            st.success(report)
-        else:
-            st.warning(report)
+        # --- Recurring: show tasks due in future ---
+        recurring_in_schedule = [t for t in schedule.tasks if t.recurrence]
+        if recurring_in_schedule:
+            st.markdown("**Upcoming recurrences (next occurrence preview):**")
+            next_rows = []
+            for t in recurring_in_schedule:
+                nxt = t.next_occurrence()
+                next_rows.append({
+                    "Task": t.name,
+                    "Recurrence": t.recurrence,
+                    "Next Due": nxt.scheduled_time.strftime("%A, %b %d %I:%M %p") if nxt.scheduled_time else "—",
+                })
+            st.table(next_rows)

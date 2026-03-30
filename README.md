@@ -22,6 +22,45 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## 📸 Demo
+
+![PawPal+ Streamlit app](image.png)
+
+---
+
+## ✨ Features
+
+### Greedy Priority Scheduler
+Tasks are scored and sorted before scheduling. Each task's score combines its base priority (+3 for mandatory, +5 if the deadline falls within 24 hours, capped at 10). The planner iterates tasks in descending score order and greedily assigns each one a start time until the owner's available time is exhausted — ensuring the highest-value tasks always land in the schedule first.
+
+### Time-Aware Daily Planning
+Every accepted task is assigned a concrete start time (8 AM for morning, 6 PM for evening, 9 AM for flexible). Tasks are placed back-to-back in priority order and the schedule is sorted chronologically before display, so the output reads like a real timetable rather than an unordered list.
+
+### Recurrence Engine
+Tasks support four recurrence rules — `daily`, `weekly`, `weekdays` (Mon–Fri), and `weekends` (Sat–Sun). `Task.is_due_today()` gates each task before it enters the scheduler so off-day tasks are never included. When a recurring task is completed via `Schedule.complete_task()`, `Task.next_occurrence()` computes the next valid date (skipping weekends for weekday tasks, skipping weekdays for weekend tasks) and queues a fresh copy in `schedule.upcoming` automatically.
+
+### Multi-Layer Priority Adjustment
+Priority is not a static field — it is adjusted at runtime by three independent layers before sorting:
+- **Pet layer** — mandatory tasks get +2; high-energy pets (level ≥ 7) boost exercise tasks by +1.
+- **Owner layer** — new owners get an additional +1 on all mandatory tasks so nothing critical is skipped.
+- **Preference layer** — disliked, non-mandatory tasks are reduced by 1 and filtered out entirely if the owner has expressed a preference against them.
+
+### Conflict Detection
+`Schedule.check_conflicts()` compares every pair of timed tasks using half-open window intersection (`[start, end)`). The `ConflictDetector` class extends this with three additional reports: time overlaps as `(Task, Task)` pairs, mandatory tasks excluded from the schedule due to insufficient time, and categories that exceed their configured daily limit.
+
+### Filtering
+A generated schedule can be sliced two ways without modifying the original:
+- `filter_by_pet(name)` — returns only tasks belonging to the named pet (case-insensitive).
+- `filter_by_status(completed)` — returns pending or finished tasks. Both methods return plain lists and compose freely.
+
+### Constraint Enforcement
+The `Constraint` class enforces two hard limits per scheduling run: a maximum total time (`can_fit`) and per-category occurrence caps (`task_limits`). Limits are decremented on a local copy during planning so the original constraints stay unmodified for re-use across multiple `generate_plan()` calls.
+
+### Plan Explainability
+`ExplanationEngine` produces a plain-English justification for every task in the schedule. Each reason is built from the task's flags — mandatory, deadline urgency, high priority — so the output is always grounded in the actual scoring logic rather than a generic message.
+
+---
+
 ## Getting started
 
 ### Setup
