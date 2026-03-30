@@ -80,6 +80,30 @@ Three situations are reported:
 
 The Streamlit UI (`app.py`) surfaces all of these features: a recurrence dropdown when adding tasks, a collapsible filter panel on the task list, and a conflict report that appears automatically after every schedule generation.
 
+## Testing PawPal+
+
+Run the full test suite with:
+
+```bash
+python3 -m pytest
+```
+
+All 39 tests pass. The suite covers four areas of the scheduling system:
+
+**Sorting** — verifies that tasks with a scheduled time sort earliest-first, that unscheduled tasks fall to the end of the list, and that sorting never raises on edge inputs (empty schedule, all-unscheduled).
+
+**Recurring tasks** — checks every recurrence rule (`daily`, `weekly`, `weekdays`, `weekends`) including boundary crossings (Friday → Monday for weekdays, Sunday → Saturday for weekends), that deadline offsets are preserved proportionally on each new occurrence, that `is_due_today` correctly gates tasks by day of week, and that the weekly fallback when no deadline is set defaults to Monday.
+
+**Conflict detection** — confirms that overlapping task windows are flagged, that back-to-back tasks (touching but not overlapping) are not, and that edge cases like a single task, an empty schedule, and tasks with no scheduled time are all handled without false positives. Also covers `ConflictDetector`'s mandatory-exclusion and overbooked-category reports.
+
+**Scheduling and priority** — validates that the planner respects time and category constraints (zero available time, category limit of 0), that mandatory tasks receive their priority boost and win scheduling slots over higher-base-priority optional tasks, and that `get_priority_score()` is correctly capped at 10 even when urgency and mandatory flags stack.
+
+### Confidence Level
+
+★★★★☆ (4 / 5)
+
+The core scheduling logic — priority scoring, recurrence rules, conflict detection, and constraint enforcement — is fully exercised and passes 100%. One star is held back because the test suite does not yet cover the Streamlit UI layer (`app.py`) or multi-pet scheduling interactions; those paths contain real user-facing logic that would benefit from integration tests.
+
 ### Suggested workflow
 
 1. Read the scenario carefully and identify requirements and edge cases.
